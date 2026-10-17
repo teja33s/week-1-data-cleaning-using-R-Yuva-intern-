@@ -1,0 +1,372 @@
+
+# ============================================================
+# PROJECT: Data Cleaning and Preliminary Analysis with R
+# DATASET: Titanic Passenger Dataset
+# PURPOSE: Data cleaning, preprocessing, and EDA
+# ============================================================
+
+# 1. Install and load required packages
+packages <- c("ggplot2", "dplyr", "tidyr", "corrplot")
+
+for (p in packages) {
+  if (!requireNamespace(p, quietly = TRUE)) {
+    install.packages(p)
+  }
+  library(p, character.only = TRUE)
+}
+
+# 2. Create output directory
+if (!dir.exists("output")) {
+  dir.create("output")
+}
+
+# 3. Download the public dataset
+url <- paste0(
+  "https://raw.githubusercontent.com/",
+  "mwaskom/seaborn-data/master/titanic.csv"
+)
+
+data <- read.csv(url, stringsAsFactors = FALSE)
+
+cat("Original dataset dimensions:\n")
+print(dim(data))
+
+# 4. Understand the dataset
+cat("\nDataset structure:\n")
+str(data)
+
+cat("\nSummary statistics:\n")
+print(summary(data))
+
+cat("\nMissing values before cleaning:\n")
+print(colSums(is.na(data)))
+
+# Save the original missing-value counts
+missing_before <- data.frame(
+  Column = names(data),
+  Missing_Count = colSums(is.na(data))
+)
+
+write.csv(
+  missing_before,
+  "output/missing_values_before.csv",
+  row.names = FALSE
+)
+
+# 5. Identify duplicate records
+duplicate_count <- sum(duplicated(data))
+cat("\nDuplicate rows:", duplicate_count, "\n")
+
+# Remove exact duplicate rows
+data <- data[!duplicated(data), ]
+
+# 6. Handle missing values
+# Numeric columns: replace missing values with median
+numeric_cols <- names(data)[
+  sapply(data, is.numeric)
+]
+
+for (col in numeric_cols) {
+  if (anyNA(data[[col]])) {
+    data[[col]][is.na(data[[col]])] <-
+      median(data[[col]], na.rm = TRUE)
+  }
+}
+
+# Categorical columns: replace missing values with mode
+categorical_cols <- names(data)[
+  sapply(data, function(x) is.character(x) ||
+           is.factor(x))
+]
+
+get_mode <- function(x) {
+  values <- x[!is.na(x) & x != ""]
+
+  if (length(values) == 0) {
+    return("Unknown")
+  }
+
+  names(sort(table(values), decreasing = TRUE))[1]
+}
+
+for (col in categorical_cols) {
+  data[[col]][is.na(data[[col]]) |
+                data[[col]] == ""] <-
+    get_mode(data[[col]])
+}
+
+cat("\nMissing values after cleaning:\n")
+print(colSums(is.na(data)))
+
+# Save missing-value counts after cleaning
+write.csv(
+  data.frame(
+    Column = names(data),
+    Missing_Count = colSums(is.na(data))
+  ),
+  "output/missing_values_after.csv",
+  row.names = FALSE
+)
+
+# 7. Detect outliers using the IQR method
+outlier_summary <- data.frame(
+  Variable = character(),
+  Outlier_Count = integer()
+)
+
+for (col in numeric_cols) {
+  x <- data[[col]]
+
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr_value <- IQR(x, na.rm = TRUE)
+
+  lower <- q1 - 1.5 * iqr_value
+  upper <- q3 + 1.5 * iqr_value
+
+  count <- sum(x < lower | x > upper, na.rm = TRUE)
+
+  outlier_summary <- rbind(
+    outlier_summary,
+    data.frame(
+      Variable = col,
+      Outlier_Count = count
+    )
+  )
+}
+
+print(outlier_summary)
+
+write.csv(
+  outlier_summary,
+  "output/outlier_summary.csv",
+  row.names = FALSE
+)
+
+# Visualize outliers in age and fare
+png("output/outlier_boxplots.png",
+    width = 1000, height = 500)
+
+par(mfrow = c(1, 2))
+
+boxplot(data$age, main = "Age Outliers",
+        ylab = "Age", col = "lightblue")
+
+boxplot(data$fare, main = "Fare Outliers",
+        ylab = "Fare", col = "lightgreen")
+
+dev.off()
+par(mfrow = c(1, 1))
+
+# 8. Normalize numerical variables using Min-Max scaling
+normalized_data <- data
+
+for (col in numeric_cols) {
+  minimum <- min(data[[col]], na.rm = TRUE)
+  maximum <- max(data[[col]], na.rm = TRUE)
+
+  if (maximum > minimum) {
+    normalized_data[[col]] <-
+      (data[[col]] - minimum) / (maximum - minimum)
+  } else {
+    normalized_data[[col]] <- 0
+  }
+}
+
+write.csv(
+  normalized_data,
+  "output/normalized_data.csv",
+  row.names = FALSE
+)
+
+# 9. Encode categorical variables
+# Convert categorical columns into indicator variables
+encoded_data <- model.matrix(
+  ~ . - 1,
+  data = data.frame(
+    lapply(data, function(x) {
+      if (is.character(x)) {
+        factor(x)
+      } else {
+        x
+      }
+    })
+  )
+)
+
+write.csv(
+  as.data.frame(encoded_data),
+  "output/encoded_data.csv",
+  row.names = FALSE
+)
+
+# 10. Save the cleaned dataset
+write.csv(
+  data,
+  "output/cleaned_titanic.csv",
+  row.names = FALSE
+)
+
+# 11. Exploratory Data Analysis (EDA)
+
+# Survival count
+survival_counts <- as.data.frame(
+  table(data$survived)
+)
+
+names(survival_counts) <- c(
+  "Survived", "Passenger_Count"
+)
+
+write.csv(
+  survival_counts,
+  "output/survival_summary.csv",
+  row.names = FALSE
+)
+
+# Survival distribution chart
+p1 <- ggplot(data, aes(x = factor(survived),
+                       fill = factor(survived))) +
+  geom_bar() +
+  labs(
+    title = "Titanic Passenger Survival",
+    x = "Survived (0 = No, 1 = Yes)",
+    y = "Passenger Count",
+    fill = "Survived"
+  ) +
+  theme_minimal()
+
+ggsave(
+  "output/survival_distribution.png",
+  p1, width = 7, height = 5
+)
+
+# Age distribution
+p2 <- ggplot(data, aes(x = age)) +
+  geom_histogram(
+    bins = 30,
+    fill = "steelblue",
+    color = "white"
+  ) +
+  labs(
+    title = "Passenger Age Distribution",
+    x = "Age",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+ggsave(
+  "output/age_distribution.png",
+  p2, width = 7, height = 5
+)
+
+# Survival by passenger class
+p3 <- ggplot(data, aes(
+  x = factor(pclass),
+  fill = factor(survived)
+)) +
+  geom_bar(position = "dodge") +
+  labs(
+    title = "Survival by Passenger Class",
+    x = "Passenger Class",
+    y = "Passenger Count",
+    fill = "Survived"
+  ) +
+  theme_minimal()
+
+ggsave(
+  "output/survival_by_class.png",
+  p3, width = 7, height = 5
+)
+
+# 12. Descriptive statistics
+descriptive_stats <- data.frame(
+  Variable = numeric_cols,
+  Mean = sapply(data[numeric_cols], mean),
+  Median = sapply(data[numeric_cols], median),
+  SD = sapply(data[numeric_cols], sd),
+  Minimum = sapply(data[numeric_cols], min),
+  Maximum = sapply(data[numeric_cols], max)
+)
+
+print(descriptive_stats)
+
+write.csv(
+  descriptive_stats,
+  "output/descriptive_statistics.csv",
+  row.names = FALSE
+)
+
+# 13. Correlation analysis
+# Correlations between numerical variables
+cor_data <- data[numeric_cols]
+
+cor_matrix <- cor(
+  cor_data,
+  use = "complete.obs"
+)
+
+write.csv(
+  cor_matrix,
+  "output/correlation_matrix.csv"
+)
+
+png("output/correlation_plot.png",
+    width = 900, height = 700)
+
+corrplot(
+  cor_matrix,
+  method = "color",
+  type = "upper",
+  addCoef.col = "black",
+  tl.col = "black",
+  tl.srt = 45
+)
+
+dev.off()
+
+# 14. Preliminary insight: survival rates
+survival_by_class <- data %>%
+  group_by(pclass) %>%
+  summarise(
+    Passengers = n(),
+    Survival_Rate = mean(survived) * 100,
+    .groups = "drop"
+  )
+
+print(survival_by_class)
+
+write.csv(
+  survival_by_class,
+  "output/survival_by_class_summary.csv",
+  row.names = FALSE
+)
+
+# Survival rate by sex
+survival_by_sex <- data %>%
+  group_by(sex) %>%
+  summarise(
+    Passengers = n(),
+    Survival_Rate = mean(survived) * 100,
+    .groups = "drop"
+  )
+
+print(survival_by_sex)
+
+write.csv(
+  survival_by_sex,
+  "output/survival_by_sex.csv",
+  row.names = FALSE
+)
+
+# 15. Final report in the console
+cat("\n====================================\n")
+cat("DATA CLEANING AND EDA COMPLETED\n")
+cat("====================================\n")
+
+cat("Final rows:", nrow(data), "\n")
+cat("Final columns:", ncol(data), "\n")
+cat("Remaining missing values:",
+    sum(is.na(data)), "\n")
+
+cat("\nAll output files are saved in the output folder.\n")
