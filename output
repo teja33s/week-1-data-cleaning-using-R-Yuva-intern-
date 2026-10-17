@@ -1,0 +1,17 @@
+data-cleaning-analysis-r/
+
+data_cleaning_analysis.R
+
+README.md
+
+output/
+
+cleaned_titanic.csv
+normalized_data.csv
+encoded_data.csv
+descriptive_statistics.csv
+correlation_matrix.csv
+survival_distribution.png
+age_distribution.png
+survival_by_class.png
+correlation_plot.png
